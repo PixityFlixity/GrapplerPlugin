@@ -21,35 +21,36 @@ import org.bukkit.World;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Grappler extends JavaPlugin implements Listener {
 
     private File configFile;
     private FileConfiguration config;
 
-    private final HashMap<UUID, Long> cooldowns = new HashMap<>();
+private static final Component GRAPPLER_ITEM_NAME = Component.text("§6Grapple Ability (Right Click)");
+    private final Map<UUID, Long> cooldowns = new ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
         createConfig();
+        config = getConfig();
         Bukkit.getPluginManager().registerEvents(this, this);
-        if (getCommand("grapplerreload") != null) {
-            Objects.requireNonNull(getCommand("grapplerreload")).setExecutor((sender, command, label, args) -> {
-                reloadConfig();
-                sender.sendMessage("§aGrappler config reloaded!");
-                return true;
-            });
-        }
-        if (getCommand("givegrappler") != null) {
-            Objects.requireNonNull(getCommand("givegrappler")).setExecutor((sender, command, label, args) -> {
-                if (sender instanceof Player player) {
-                    ItemStack grappler = createGrapplerItem();
-                    player.getInventory().addItem(grappler);
-                    player.sendMessage("§aGrappling ability item given!");
-                }
-                return true;
-            });
-        }
+    
+        Objects.requireNonNull(getCommand("grapplerreload")).setExecutor((sender, command, label, args) -> {
+            reloadPluginConfig();
+            sender.sendMessage("§aGrappler config reloaded!");
+            return true;
+        });
+    
+        Objects.requireNonNull(getCommand("givegrappler")).setExecutor((sender, command, label, args) -> {
+            if (sender instanceof Player player) {
+                ItemStack grappler = createGrapplerItem();
+                player.getInventory().addItem(grappler);
+                player.sendMessage("§aGrappling ability item given!");
+            }
+            return true;
+        });
     }
 
     private void createConfig() {
@@ -61,9 +62,10 @@ public class Grappler extends JavaPlugin implements Listener {
         config = YamlConfiguration.loadConfiguration(configFile);
     }
 
-    @Override
-    public void reloadConfig() {
-        config = YamlConfiguration.loadConfiguration(configFile);
+    public void reloadPluginConfig() {
+        reloadConfig();
+        config = getConfig();
+        saveConfig();
     }
 
     private ItemStack createGrapplerItem() {
@@ -82,88 +84,81 @@ public class Grappler extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
-        Player player = event.getPlayer();
-    
-            if (!hasGrappleAbilityItem(player)) {
-                return;
-            }
-
-            if (cooldowns.containsKey(player.getUniqueId())) {
-                long timeLeft = (cooldowns.get(player.getUniqueId()) - System.currentTimeMillis()) / 1000;
-                if (timeLeft > 0) {
-                    player.sendActionBar(Component.text("§cYou must wait " + timeLeft + " seconds to use the grappler again."));
-                    return;
-                }
-            }
-
-            if (event.getAction().isRightClick()) {
-                int maxDistance = config.getInt("max-distance", 50);
-                Block targetBlock = player.getTargetBlockExact(maxDistance);
-
-                if (targetBlock == null) {
-                    player.sendActionBar(Component.text("§cNo valid block found within range!"));
-                    getLogger().info("No target block found for player " + player.getName());
-                    return;
-                }
-
-                getLogger().info("Target block found: " + targetBlock.getType() + " at " + targetBlock.getLocation());
-
-                Location targetLocation = targetBlock.getLocation().add(0.5, 1, 0.5);
-                double distance = player.getLocation().distance(targetLocation);
-
-                if (distance <= maxDistance) {
-                    int cooldownTime = Math.max(0, config.getInt("cooldown", 5));
-                    cooldowns.put(player.getUniqueId(), System.currentTimeMillis() + (cooldownTime * 1000L));
-
-                    player.sendActionBar(Component.text("§aGrappling to target!"));
-                    getLogger().info("Player " + player.getName() + " grappling to " + targetLocation);
-
-                    new BukkitRunnable() {
-                        final World world = player.getWorld();
-                        final Location startLoc = player.getLocation().add(0, 1, 0);
-                        final Vector direction = targetLocation.toVector().subtract(startLoc.toVector()).normalize();
-                        double distanceTraveled = 0;
-
-                        @Override
-                        public void run() {
-                            if (distanceTraveled >= distance || !player.isOnline()) {
-                                cancel();
-                                return;
-                            }
-
-                            Vector movement = direction.clone().multiply(0.5);
-                            player.setVelocity(movement);
-
-                            Location playerLoc = player.getLocation().add(0, 1, 0);
-                            Vector leashVector = targetLocation.toVector().subtract(playerLoc.toVector());
-                            double leashLength = leashVector.length();
-                            Vector leashDirection = leashVector.normalize();
-
-                            for (double i = 0; i < leashLength; i += 0.5) {
-                                Location particleLoc = playerLoc.clone().add(leashDirection.clone().multiply(i));
-                                world.spawnParticle(Particle.CRIT, particleLoc, 1, 0, 0, 0, 0);
-                            }
-
-                            distanceTraveled += 0.5;
-                        }
-                    }.runTaskTimer(this, 0, 1);
-                } else {
-                    player.sendActionBar(Component.text("§cTarget block is out of range!"));
-                    getLogger().info("Target block out of range for player " + player.getName());
-            }
+        if (!event.getAction().isRightClick() || !hasGrappleAbilityItem(event.getPlayer())) {
+            return;
         }
+    
+        Player player = event.getPlayer();
+        long currentTime = System.currentTimeMillis();
+        long cooldownTime = cooldowns.getOrDefault(player.getUniqueId(), 0L);
+    
+        if (currentTime < cooldownTime) {
+            long timeLeft = (cooldownTime - currentTime) / 1000;
+            player.sendActionBar(Component.text("§cYou must wait " + timeLeft + " seconds to use the grappler again."));
+            return;
+        }
+    
+        int maxDistance = config.getInt("max-distance", 50);
+        Block targetBlock = player.getTargetBlockExact(maxDistance);
+    
+        if (targetBlock == null) {
+            player.sendActionBar(Component.text("§cNo valid block found within range!"));
+            return;
+        }
+    
+        Location targetLocation = targetBlock.getLocation().add(0.5, 1, 0.5);
+        double distance = player.getLocation().distance(targetLocation);
+    
+        if (distance > maxDistance) {
+            player.sendActionBar(Component.text("§cTarget block is out of range!"));
+            return;
+        }
+    
+        int cooldownDuration = Math.max(0, config.getInt("cooldown", 5));
+        cooldowns.put(player.getUniqueId(), currentTime + (cooldownDuration * 1000L));
+    
+        player.sendActionBar(Component.text("§aGrappling to target!"));
+        grapplePlayer(player, targetLocation, distance);
+    }
+    
+    private void grapplePlayer(Player player, Location targetLocation, double distance) {
+        new BukkitRunnable() {
+            final World world = player.getWorld();
+            final Location startLoc = player.getLocation().add(0, 1, 0);
+            final Vector direction = targetLocation.toVector().subtract(startLoc.toVector()).normalize();
+            double distanceTraveled = 0;
+    
+            @Override
+            public void run() {
+                if (distanceTraveled >= distance || !player.isOnline()) {
+                    cancel();
+                    return;
+                }
+    
+                Vector movement = direction.clone().multiply(0.5);
+                player.setVelocity(movement);
+    
+                Location playerLoc = player.getLocation().add(0, 1, 0);
+                spawnParticles(world, playerLoc, targetLocation);
+    
+                distanceTraveled += 0.5;
+            }
+        }.runTaskTimer(this, 0, 1);
     }
 
+private void spawnParticles(World world, Location start, Location end) {
+    Vector direction = end.toVector().subtract(start.toVector()).normalize();
+    double distance = start.distance(end);
+    double step = 0.5;
+    for (double i = 0; i < distance; i += step) {
+        Location particleLoc = start.clone().add(direction.clone().multiply(i));
+        world.spawnParticle(Particle.CRIT, particleLoc, 1, 0, 0, 0, 0);
+    }
+}
     private boolean hasGrappleAbilityItem(Player player) {
-        for (ItemStack item : player.getInventory()) {
-            if (item != null && item.getType() == Material.PAPER && item.hasItemMeta()) {
-                ItemMeta meta = item.getItemMeta();
-                if (meta != null && Component.text("§6Grapple Ability (Right Click)").equals(meta.displayName())) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return player.getInventory().getItemInMainHand().getType() == Material.PAPER &&
+               player.getInventory().getItemInMainHand().getItemMeta() != null &&
+               GRAPPLER_ITEM_NAME.equals(player.getInventory().getItemInMainHand().getItemMeta().displayName());
     }
 
     @Override
