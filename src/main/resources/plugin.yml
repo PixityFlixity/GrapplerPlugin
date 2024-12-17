@@ -1,0 +1,21 @@
+name: Grappler
+version: '1.0.0-SNAPSHOT'
+main: lol.pixity.grappler.Grappler
+api-version: '1.21'
+prefix: Grappler
+load: STARTUP
+authors: [ Pixityy ]
+description: BendersMC Dev App Plugin
+website: pixity.lol
+commands:
+  grapplerreload:
+    description: Reloads the Grappler plugin configuration.
+    usage: /<command>
+    permission: grappler.reload
+    permission-message: You don't have permission to reload the Grappler plugin.
+
+  givegrappler:
+    description: Gives the player a grappling hook.
+    usage: /<command>
+    permission: grappler.give
+    permission-message: You don't have permission to receive a grappling hook.

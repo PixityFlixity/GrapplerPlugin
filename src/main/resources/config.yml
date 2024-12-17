@@ -1,0 +1,5 @@
+# Maximum distance (in blocks) that the grappling hook can reach
+max-distance: 25
+
+# Cooldown time (in seconds) between grappling hook uses
+cooldown: 5
